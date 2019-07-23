@@ -1,0 +1,157 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &1347543993763384303
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 6702668494439938461}
+  - component: {fileID: 5436366208438752753}
+  m_Layer: 0
+  m_Name: FurGenerator_Short
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &6702668494439938461
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1347543993763384303}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 7684399556952883198}
+  m_RootOrder: 0
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &5436366208438752753
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1347543993763384303}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5349812c91fc40345bfadb3cbc0531f0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  shader: {fileID: 4800000, guid: cd53fff9634fef74083913d2e1c968f2, type: 3}
+  furMaterial: {fileID: 2100000, guid: 36423b70a9df24940b69d4ce24ca1e5e, type: 2}
+  kernalName: FurMain03
+  computeShader: {fileID: 7200000, guid: 6676ef58c4d1cc64ab39d755a674c7bc, type: 3}
+  furPosMap: {fileID: 2800000, guid: da6ca0c39ba5071489590729e9c0cfd2, type: 3}
+  furNormalMap: {fileID: 2800000, guid: 366260f0045e5c1448f80883ac2d8baf, type: 3}
+  furClumpingMap: {fileID: 2800000, guid: cd2c194482b952c47bfb85bdd14f13c1, type: 3}
+  furVolMap01: {fileID: 2800000, guid: 18357a02918e09b449bffcb49a338954, type: 3}
+  furVolMap02: {fileID: 2800000, guid: 6e32f66b6857caf45970674734255937, type: 3}
+  furVolMap03: {fileID: 2800000, guid: 48e52d7a2c5d75d4aba2f72a9e2a7768, type: 3}
+  furPhxBoneIDMap: {fileID: 2800000, guid: 6c4c089fa0d590043b84aec566d8a8a4, type: 3}
+  furPhxBoneSkinningMap: {fileID: 2800000, guid: 64b6851bc67b1844d801c1ea0f5be68f,
+    type: 3}
+  furmaskMap: {fileID: 2800000, guid: e32fe60b750b8bb49b2a8da84b1fe7b1, type: 3}
+  furType: 0
+  TearInt: 1
+  furAmountMultiplier: 2
+  furTexResolutionX: 256
+  furTexResolutionY: 256
+  furLength: 1
+  furCut: 1
+  furSpawnNoise: 1
+  furWidth: 0.036
+  furTipTape: 0.655
+  furClumpingInt: 1
+  furClumpingNoise: 0.802
+  furClumpingClusterAmountX: 6
+  furClumpingClusterAmountY: 6
+  furTwistInt: 0
+  furFuzzyInt: 0
+  furFuzzyNoise: 1
+  furwaveIntensity: 1.19
+  furWaveDirection: 0
+  furWaveDirectionNoise: 0.155
+  furWavePhaseNoise: 0.065
+  furWaveIntensityNoise: 0
+  alphaDither: 0
+  alphaDitherSize: 2.51
+  alphaEnhancement: 1
+  alphaThreshold: 0
+  flowIntensity: 0
+  gravityIntensity: 0
+  cmpShaderFur: {fileID: 5436366208438752753}
+  VertCount: 20000000
+--- !u!1 &7684399556952883192
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 7684399556952883198}
+  - component: {fileID: 7684399556952883197}
+  - component: {fileID: 7684399556952883199}
+  m_Layer: 0
+  m_Name: Girl_Cape_Top
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &7684399556952883198
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7684399556952883192}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children:
+  - {fileID: 6702668494439938461}
+  m_Father: {fileID: 0}
+  m_RootOrder: 0
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &7684399556952883197
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7684399556952883192}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a68c47fabf34f304dae12d7dcaedb3e6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  furGeneratorList:
+  - {fileID: 0}
+  tearIntensity: 0.1
+  fabricMat: {fileID: 2100000, guid: cc789c5d2ab0ea74e81a8f140e2e9d1a, type: 2}
+--- !u!114 &7684399556952883199
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7684399556952883192}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 42f96ac43e0b69247b21dfa494c3a050, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  furMaterials: []
+  baseBoneListByID: []
+  baseBnInitInvXF: []
+  baseRigRoot: {fileID: 0}
+  furRigRoot: {fileID: 0}
+  furBuider: {fileID: 0}
+  constraintPath: D:\FurBonesConstraint.xml

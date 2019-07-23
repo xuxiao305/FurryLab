@@ -1,0 +1,692 @@
+#pragma kernel FurMain03
+
+#include "NoiseInclude.compute"
+#include "MatrixMath.compute"
+
+//We define the size of a group in the x and y directions, z direction will just be one
+#define thread_group_size_x 1
+#define segment_count 3
+#define UNIT_FACTOR 0.01
+#define GUIDELINE_NORMALIZE_FACTOR 50
+#define POS_NORMALIZE_FACTOR 150.0
+#define BONE_NUM_PER_LAYER 9
+
+
+int _FurType = 0;
+
+int _FurTexResX = 1024;
+int _FurTexResY = 64;
+int _FurMultiplier = 10.0;
+
+float _TearInt = 1.0;
+
+
+//A struct that simple holds a position
+struct PositionStruct
+{
+	float3 pos; 
+};
+
+
+struct LineOutputStruct
+{
+	float4 pos0;
+	float3 clumpingGuidePos0;
+	float3 twistPos0;
+	// vertex 1 - xy - mesh UV, z - random id
+	// vertex 2 - xyz - mesh normal
+	// vertex 3 - xyz - pos1
+	float4 dataPack; 
+
+	// vertex 1 - skinningWeight;
+	// vertex 2 - skinningBoneID;
+	// vertex 3 - clumpingPos for 4th vertex
+	float4 dataPack2;
+
+	// vertex 1 - clump skinningWeight;
+	// vertex 2 - clump skinningBoneID;
+	// vertex 3 - Twist pos for 4th vertex
+	float4 dataPack3;
+
+	// float3 clumpingGuidePos1;
+	
+
+	// float3 pos1;
+	// float3 color;
+	// float3 percent;
+	// float3 meshUV;
+};
+
+
+//A constant buffer struct that holds a time variable sent from Unity
+struct CBufferStruct
+{
+	float furAmount;
+	float furLength;
+	float furSpawnNoise;
+	float fuzzyInt;
+	float clumpingInt;
+	float clumpingIntNoise;
+	float clumpingClusterAmountX;
+	float clumpingClusterAmountY;
+	float flowInt;
+	float gravityInt;
+	float waveInt;
+	float waveDirection;
+	float waveDirectionNoise;
+	float wavePhaseNoise;
+	float waveIntNoise;
+};
+
+RWStructuredBuffer<CBufferStruct> cBuffer;
+RWStructuredBuffer<PositionStruct> output;
+RWStructuredBuffer<LineOutputStruct> lineOutput;
+
+Texture2D FurPosMap; 	SamplerState samplerFurPosMap;
+Texture2D FurNormalMap; SamplerState samplerFurNormalMap;
+Texture2D FurClumpingMap; 	SamplerState samplerFurClumpingMap;
+
+Texture2D FurVolMap01; 	SamplerState samplerFurVolMap01;
+Texture2D FurVolMap02; 	SamplerState samplerFurVolMap02;
+Texture2D FurVolMap03; 	SamplerState samplerFurVolMap03;
+Texture2D FurMaskMap; 	SamplerState samplerFurMaskMap;
+Texture2D FurSkinningWeightMap; SamplerState samplerFurSkinningWeightMap;
+
+Texture2D FurPhxBoneIDMap; SamplerState samplerFurPhxBoneIDMap;
+Texture2D FurPhxBoneSkinningMap; SamplerState samplerFurPhxBoneSkinningMap;
+
+
+// RWTexture2D<float4> debugTex;
+
+float3 FixPosition( float3 _pos)
+{
+	float3 pos = _pos;
+	pos.x *= -1.0;
+	
+	pos *= 0.5;
+	pos += float3(-0.3, 0.7, 0.2);
+	return pos;
+}
+
+float3 FixDirection(float3 _vec)
+{
+	return float3(-_vec.x, _vec.y, _vec.z);
+}
+
+float2 intToUV(int index, int size)
+{
+	float i = float(index);
+	float s = float(size);
+
+	float y = floor(i / s) / float(s); 
+
+	float x = fmod(i, s) / float(s);
+
+	return float2(x, y);
+}
+
+int tableToInt(int x, int y, int width)
+{
+	return y * width + x;
+}
+
+void GetTNB(float3 currentPos, float3 nextPos, 
+             out float3 tangent, out float3 normal, out float3 binormal)
+{
+	float3 tempUp = float3(0,1,0);
+	tangent = normalize(nextPos - currentPos);
+	binormal = normalize(cross(tangent, tempUp));
+	normal = normalize(cross(binormal, tangent));
+	binormal = normalize(cross(tangent, normal));
+
+}
+
+
+struct FuzzyEffect
+{
+	float3  fuzzyNoise;
+	int 	strandID;
+
+	void InitFuzzy(int _strandID)
+	{
+		strandID = _strandID;
+	}
+
+	void GetFuzzy(int _indexOffset)
+	{
+		fuzzyNoise = float3(0.0,0.0,0.0);
+		NumberGenerator rand;
+
+		rand.SetSeed(_indexOffset + strandID * 0.001);
+		fuzzyNoise.x = rand.GetRandomFloat(-1.0, 1.0) * 0.002;
+
+		rand.SetSeed(_indexOffset + strandID * 100 + 20);
+		fuzzyNoise.y = rand.GetRandomFloat(-1.0, 1.0) * 0.002;
+
+		rand.SetSeed(_indexOffset + strandID * 100000 + 100);
+		fuzzyNoise.z = rand.GetRandomFloat(-1.0, 1.0) * 0.002;
+	}
+};
+
+
+struct WaveEffect
+{
+	int  	strandID;
+
+	float 	waveInt;
+	float   wavePhaseNoise;
+	float 	waveDirection;
+	float 	waveDirectionNoise;
+	float 	waveIntNoise;
+
+	void InitWave(int _strandID)
+	{
+		strandID = _strandID;
+		wavePhaseNoise = cBuffer[0].wavePhaseNoise;
+		waveDirection = cBuffer[0].waveDirection;
+		waveDirectionNoise = cBuffer[0].waveDirectionNoise;
+		waveIntNoise = cBuffer[0].waveIntNoise;
+		waveInt = cBuffer[0].waveInt;
+	}
+
+	float3 GetWave(float percent, float3x3 tangentMatrix, float randSeed)
+	{
+		// float cosine = cos(waveDirection + strandID * waveDirectionNoise);
+		// float sine = sin(waveDirection + strandID * waveDirectionNoise);
+		NumberGenerator rand;
+		rand.SetSeed(randSeed);
+		float randFloat = rand.GetRandomFloat(-1,1);
+		float cosine = cos(waveDirection + randFloat * waveDirectionNoise);
+		float sine = sin(waveDirection + randFloat * waveDirectionNoise);	
+
+		float3x3 rotateMatrix = float3x3(cosine, 	0.0, 	sine,
+		                                 0.0,		1.0,	0.0,
+		                                 -sine,		0.0,	cosine);
+
+
+		float3 	localWaveVec = float3(sin(percent * 10.0  + randFloat * wavePhaseNoise * 10), 0.0, 0.0) * 0.1;
+
+				localWaveVec = mul(rotateMatrix, localWaveVec) * percent * percent * waveInt;
+		float3	waveVec = mul(tangentMatrix, localWaveVec);
+
+		return waveVec;
+
+
+	}
+
+};
+
+
+struct Guideline
+{
+	int furAmount;
+	int strandID;
+	float2 uv;
+	float3 spawnPos;
+	float2 spawnNoise;
+	float mask;
+	float4 skinningWeight;
+	float4 skinningBoneID;
+
+
+	float2 AddNoise(int seed)
+	{
+		NumberGenerator rand;
+	
+		rand.SetSeed(seed * 50.0);
+		spawnNoise.x = rand.GetRandomFloat(-1.0, 1.0);
+
+		rand.SetSeed(seed * 100.0);
+		spawnNoise.y = rand.GetRandomFloat(-1.0, 1.0);
+
+		return spawnNoise *0.05 ;
+
+	}
+	void InitGuideline(float2 _uv, int _strandID, float2 clumpingClusterAmount, float _noiseInt )
+	{
+		furAmount = int(cBuffer[0].furAmount);
+		spawnNoise = 0.0;
+
+		strandID = _strandID;
+		uv = _uv;
+		// uv = intToUV(strandID, sqrt((cBuffer[0].furAmount)));
+
+		if (length(clumpingClusterAmount) == 0)
+		{
+			uv += AddNoise(strandID) * _noiseInt;
+		}
+		
+		else
+		{
+			uv += AddNoise(strandID * 2.0) * _noiseInt;
+			// uv.x = floor(uv.x * clumpingClusterAmount + 0.5 ) / clumpingClusterAmount;
+			// uv.y = floor(uv.y * clumpingClusterAmount + 0.5 ) / clumpingClusterAmount; 
+			
+			float2 clumpingUV = FurClumpingMap.SampleLevel(samplerFurClumpingMap, uv * clumpingClusterAmount , 0.0).xy;
+
+			float2 uvIslandIndex = floor(uv * clumpingClusterAmount);
+			uv = (clumpingUV + uvIslandIndex) / clumpingClusterAmount;
+		}
+
+		spawnPos = FurPosMap.SampleLevel(samplerFurPosMap, uv, 0.0).xyz * 2.0 - 1.0;
+		spawnPos.yz = spawnPos.zy;
+		spawnPos.z = -spawnPos.z;
+		spawnPos.x = -spawnPos.x;
+		spawnPos *= POS_NORMALIZE_FACTOR * UNIT_FACTOR;
+
+		mask = 1.0;
+		mask = step(0.001, FurVolMap01.SampleLevel(samplerFurVolMap01, uv, 0.0).x);
+		mask *= step(0.001, FurPosMap.SampleLevel(samplerFurPosMap, uv, 0.0).x);
+
+		// sample d
+		float4 tearMask = FurMaskMap.SampleLevel(samplerFurMaskMap, uv, 0.0);
+
+		// if (_FurType == 0)
+		// {
+		// 	mask *= step(0.001, lerp(1.0, tearMask.r * tearMask.a, _TearInt));
+		// }
+		// if (_FurType == 1)
+		// {
+		// 	mask *=  step(0.12, lerp(0.0, tearMask.r * tearMask.a, _TearInt));
+		// }
+		// else
+		// {
+		// 	mask *= step(0.12, lerp(0.0, tearMask.r * tearMask.a, _TearInt));
+		// }
+
+
+		// skinningWeight = FurSkinningWeightMap.SampleLevel(samplerFurSkinningWeightMap, uv, 0.0);
+
+		skinningWeight = FurPhxBoneSkinningMap.SampleLevel(samplerFurPhxBoneSkinningMap, uv, 0.0);
+		skinningBoneID = floor(FurPhxBoneIDMap.SampleLevel(samplerFurPhxBoneIDMap, uv, 0.0) * BONE_NUM_PER_LAYER); // -1 to compentsate 1 based bone id
+	}
+
+	float3 ComputeGuideVec_WornFabric(float _percent)
+	{		
+
+		float3 guidelineVecList[4];
+
+		// find the anchor point on the other side
+		float2 anchorUV = 0.0;
+		int acrossTornPixels = 0;
+
+		int tornWidth = 5;
+		float tearThrehold = 0.1;
+		for (int a = 0; a < 300; a++)
+		{
+			float2 uvStep = float2(a * 0.001, 0.0);
+			float stepTearMask = FurMaskMap.SampleLevel(samplerFurMaskMap, uv + uvStep, 0.0).a;
+
+			stepTearMask = smoothstep(_TearInt - 0.2, _TearInt + 0.2, stepTearMask); 
+
+			bool reachedTheOtherSide = stepTearMask > tearThrehold && acrossTornPixels > tornWidth;
+			bool tooFarFromTorn = a > 60 && acrossTornPixels == 0;
+
+			if (tooFarFromTorn)
+			{
+				mask *= 0;
+				break;
+			}
+			else
+			{
+			
+				// if it reach the other side, then fill the value to anchorUV
+				if (reachedTheOtherSide)
+				{
+					anchorUV = uv + uvStep;
+					break;			
+				}
+				//otherwise, add 1 more pixel to acrossTornPixels
+				if (stepTearMask <= tearThrehold)
+				{
+					acrossTornPixels += 1;
+				}
+				else 
+				{
+					acrossTornPixels -= 1;
+				}
+			}
+
+		}
+
+		float anchorTearMask = FurMaskMap.SampleLevel(samplerFurMaskMap, anchorUV, 0.0).a;
+		anchorTearMask = smoothstep(_TearInt - 0.2, _TearInt + 0.2, anchorTearMask); 
+
+		bool notMoving = length(anchorUV) <= tearThrehold ;
+		bool reachBrokenPixel = anchorTearMask <= tearThrehold;
+
+		if (notMoving || reachBrokenPixel)
+		{
+			mask *= 0.0;
+		}
+
+		if ( FurPosMap.SampleLevel(samplerFurPosMap, anchorUV, 0.0).x < 0.01)
+		{
+			mask *= 0.0;
+		}
+
+
+		float travelLength = length(anchorUV - uv);
+		for (int i = 0; i < 4; i ++)
+		{
+			float2 stepUV = uv + i * (anchorUV - uv) / 3.0; 
+
+			float3 stepPosMap = FurPosMap.SampleLevel(samplerFurPosMap, stepUV, 0.0).xyz * 2.0 - 1.0;
+
+			stepPosMap.yz = stepPosMap.zy;
+			stepPosMap.z = -stepPosMap.z;
+			stepPosMap.x = -stepPosMap.x;
+
+			stepPosMap *= POS_NORMALIZE_FACTOR * UNIT_FACTOR ;
+
+
+			guidelineVecList[i] = stepPosMap - spawnPos;
+
+
+			if (i == 1 || i == 2)
+			{
+				guidelineVecList[i].y -= 0.05 * travelLength;
+			}
+		}
+
+		float3	guidelineVec1 = guidelineVecList[0];
+		float3	guidelineVec2 = guidelineVecList[1];
+		float3	guidelineVec3 = guidelineVecList[2];
+		float3	guidelineVec4 = guidelineVecList[3];
+
+		float3  guidelineVec = 0.0;
+
+				if (_percent < 0.25)
+				{
+					guidelineVec = 0.0;/// lerp(0.0, guidelineVec1, _percent * 4.0);
+				} 
+				else if (_percent < 0.5)
+				{
+					guidelineVec = guidelineVec2;
+				}
+				else if (_percent < 0.75)
+				{
+					guidelineVec = guidelineVec3;
+				}
+				else
+				{
+					guidelineVec = guidelineVec4;
+				}	
+		return guidelineVec; 
+	}
+
+	float3 ComputeGuideVec_Fur(float _percent)
+	{		
+		float3	guidelineVec1 = FurVolMap01.SampleLevel(samplerFurVolMap01, uv, 0.0).xyz * 2.0 - 1.0;
+		float3	guidelineVec2 = FurVolMap02.SampleLevel(samplerFurVolMap02, uv, 0.0).xyz * 2.0 - 1.0;
+		float3	guidelineVec3 = FurVolMap03.SampleLevel(samplerFurVolMap03, uv, 0.0).xyz * 2.0 - 1.0;
+
+				guidelineVec1.yz = guidelineVec1.zy;
+				guidelineVec2.yz = guidelineVec2.zy;
+				guidelineVec3.yz = guidelineVec3.zy;
+
+				guidelineVec1.z = -guidelineVec1.z;
+				guidelineVec2.z = -guidelineVec2.z;
+				guidelineVec3.z = -guidelineVec3.z;
+
+				guidelineVec1 *= UNIT_FACTOR * GUIDELINE_NORMALIZE_FACTOR;
+				guidelineVec2 *= UNIT_FACTOR * GUIDELINE_NORMALIZE_FACTOR;
+				guidelineVec3 *= UNIT_FACTOR * GUIDELINE_NORMALIZE_FACTOR;
+
+		float3  guidelineVec = 0.0;
+
+				if (_percent < 0.25)
+				{
+					guidelineVec = 0.0;
+				} 
+				else if (_percent < 0.5)
+				{
+					guidelineVec = guidelineVec1;
+				}
+				else if (_percent < 0.75)
+				{
+					guidelineVec = guidelineVec2;
+				}
+				else
+				{
+					guidelineVec = guidelineVec3;
+				}	
+
+		return guidelineVec; 
+	}
+};
+
+struct FurPoint
+{
+	float  		percent;
+	float3 		pos;
+	int 		indexOffset;
+	float 		furLength;
+	Guideline 	growGuide;
+	Guideline 	clumpGuide;
+	float 		clumpingInt; 
+	float 		gravityInt;
+	float3 		clumpedPos;
+
+
+	void InitPoint(int _indexOffset, Guideline _growGuide, Guideline _clumpGuide)
+	{
+		indexOffset = _indexOffset;
+		percent = (float(indexOffset) / float(segment_count - 1.0)) / 1.5; // / 1.5 to normalize
+
+		furLength = cBuffer[0].furLength;
+		gravityInt = cBuffer[0].gravityInt;
+		pos = 0.0;
+		growGuide = _growGuide; 
+		clumpGuide = _clumpGuide;
+		clumpingInt = cBuffer[0].clumpingInt;
+		clumpedPos = 0.0;
+
+
+	}
+
+	float3 AddFuzzy(FuzzyEffect _fuzzyFx)
+	{
+		_fuzzyFx.GetFuzzy(indexOffset);
+		return _fuzzyFx.fuzzyNoise * cBuffer[0].fuzzyInt * step(0.001, furLength);
+	}
+
+
+	void GrowFur(FuzzyEffect _fuzzyFx, WaveEffect _waveFx, float3x3 _tangentMatrix)
+	{ 
+		float 	randomWaveSeed = sin(clumpGuide.uv.x * 10.0) + cos(clumpGuide.uv.y * 10.0);
+
+		float3 	guidelineVec 	= 0.0;
+		float3  clumpGuideVec = 0.0;
+		if (_FurType == 0 || _FurType == 1) 
+		{	
+				guidelineVec 	= growGuide.ComputeGuideVec_Fur(percent) ;
+				clumpGuideVec  	= clumpGuide.ComputeGuideVec_Fur(percent);
+		}
+		else if (_FurType == 2)
+		{
+			 	guidelineVec 	= growGuide.ComputeGuideVec_WornFabric(percent) ;
+			 	clumpGuideVec  	= clumpGuide.ComputeGuideVec_WornFabric(percent);
+
+		}
+			
+
+
+		float3  growPos 	= growGuide.spawnPos + guidelineVec * furLength;
+
+				pos = growPos;
+
+				if(clumpGuide.mask > 0.0)
+				{
+					clumpedPos 	= clumpGuide.spawnPos + clumpGuideVec * furLength;
+				}
+				else
+				{
+					clumpedPos = growPos;
+				}
+				
+				// clumpedPos.y -= gravityInt * pow(percent, 1.0) * 0.08;
+				// clumpedPos += _waveFx.GetWave(percent, _tangentMatrix, randomWaveSeed) * step(0.001, furLength) * 0.1;
+
+				// if (clumpGuide.mask > 0.0 )
+				// {
+				// 	pos =  lerp(growPos, clumpedPos, (percent * 1.5) * clumpingInt); // why the percent need to x1.5??
+				// }
+		  // 		else
+		  // 		{ 
+		  // 			pos = growPos;
+		  // 		} 
+
+		  		
+		  		// pos += AddFuzzy(_fuzzyFx);
+	}
+
+};
+
+
+[numthreads(1, 1, segment_count)]
+void FurMain03(uint3 id : SV_DispatchThreadID, uint3 groupID : SV_GroupID, uint3 threadID: SV_GroupThreadID)
+{
+
+	// Unpacking the parameters
+	float 	clumpingInt 		= cBuffer[0].clumpingInt;
+	int 	furAmount 			= int(cBuffer[0].furAmount);
+
+	int 	segID = id.z;
+
+	int 	strandID = id.y * _FurTexResX + id.x;
+
+	int 	t = strandID  * segment_count + segID;
+
+	float2  uv = 0;
+			uv.x = float(id.x) / float(_FurTexResX * _FurMultiplier - 1);
+			uv.y = float(id.y) / float(_FurTexResY * _FurMultiplier - 1);
+
+			lineOutput[t].pos0 = (t + 1) * 0.01;
+
+			lineOutput[t].dataPack = 1.0;
+			lineOutput[t].dataPack2 = 1.0;
+			lineOutput[t].dataPack3 = 1.0;
+
+			lineOutput[t].clumpingGuidePos0 = 1.0;	
+			lineOutput[t].twistPos0 = 1.0;			
+/*
+			Guideline growGuide;
+			growGuide.InitGuideline(uv, strandID, 0,  cBuffer[0].furSpawnNoise);
+
+			Guideline clumpGuide;
+			float2 clumpAmount = float2(cBuffer[0].clumpingClusterAmountX, cBuffer[0].clumpingClusterAmountY);
+			clumpGuide.InitGuideline(uv, strandID, clumpAmount, cBuffer[0].clumpingIntNoise);
+
+	float3  temp = normalize(float3(0.0, 1.0, 0.0));
+
+	float3  spawnNormal = normalize(FurNormalMap.SampleLevel(samplerFurNormalMap, growGuide.uv, 0.0).xyz * 2.0 - 1.0);
+			spawnNormal.x *= -1;
+
+	float3  macroTangent = normalize(cross(temp, spawnNormal));     
+    float3  macroBinormal = normalize(cross(macroTangent, spawnNormal));
+    		macroTangent = normalize(cross(macroBinormal, spawnNormal));
+
+
+	float3x3 tangentMatrix = float3x3(macroTangent.x, macroBinormal.x, spawnNormal.x,
+									  macroTangent.y, macroBinormal.y, spawnNormal.y,
+									  macroTangent.z, macroBinormal.z, spawnNormal.z);
+
+	float3  furPos[2];
+	float3  furClumpedPos[2];
+
+			FurPoint furPnt0;	FurPoint furPnt1;
+
+			FurPoint furPoints[2] = {furPnt0, furPnt1}; 
+
+			FuzzyEffect fuzzyFx;
+			fuzzyFx.InitFuzzy(strandID);
+
+			WaveEffect waveFx;
+			waveFx.InitWave(strandID );
+
+			for (int k = 0; k < 2; k++)
+			{
+				furPoints[k].InitPoint(segID + k, growGuide, clumpGuide);
+				furPoints[k].GrowFur(fuzzyFx, waveFx, tangentMatrix);
+				furPos[k] = furPoints[k].pos;
+				furClumpedPos[k] = furPoints[k].clumpedPos;
+			}
+
+
+			lineOutput[t].pos0.xyz = furPos[0];
+
+			lineOutput[t].clumpingGuidePos0 = furClumpedPos[0];
+
+			float3 	N0, T0, B0;
+
+			GetTNB(furClumpedPos[1], furClumpedPos[0], T0, N0, B0);
+
+
+			// Transform the fur pos to the coressponding local space of the clump guideline!
+			float4x4 ClumpPosMat = float4x4(T0.x, B0.x, N0.x, furClumpedPos[0].x,
+			                         		T0.y, B0.y, N0.y, furClumpedPos[0].y,
+			                        		T0.z, B0.z, N0.z, furClumpedPos[0].z,
+			                         	    0.0,  0,	 0.0, 	1.0);
+
+
+			float4x4 InvClumpPosMat = inverse(ClumpPosMat);
+
+			// float4x4 transInvClumpPosMat = transpose(InvClumpPosMat);
+			// lineOutput[t].clumpingGuidePos0 = transInvClumpPosMat[3].xyz;
+
+			float twistAngle1 = furPoints[0].percent  * 3;
+			float twistAngle2 = furPoints[1].percent  * 3;
+
+			float sin1 = sin(twistAngle1); float sin2 = sin(twistAngle2);
+			float cos1 = cos(twistAngle1); float cos2 = cos(twistAngle2);
+			
+			float3x3 twistMat1 = float3x3(1, 0.0, 0,
+			                             0.0,  cos1, -sin1,
+			                             0.0, sin1, cos1);
+
+			float3x3 twistMat2 = float3x3(1, 0.0, 0,
+			                             0.0,  cos2, -sin2,
+			                             0.0, sin2, cos2);
+
+
+			float3 	twistPos0 = mul(twistMat1, mul(InvClumpPosMat, float4(furPos[0], 1.0)).xyz);
+					twistPos0 = mul(ClumpPosMat, float4(twistPos0, 1.0)).xyz;
+			
+			float3  twistPos1 = mul(twistMat2, mul(InvClumpPosMat, float4(furPos[1], 1.0)).xyz);
+					twistPos1 = mul(ClumpPosMat, float4(twistPos1, 1.0)).xyz;
+
+
+			lineOutput[t].twistPos0 = twistPos0;
+
+			if (segID == 0)
+			{
+				lineOutput[t].dataPack.xy = furPoints[0].growGuide.uv; 
+				lineOutput[t].dataPack.z =  frac(furPoints[0].growGuide.strandID % 10.5);
+				lineOutput[t].dataPack2 = growGuide.skinningWeight;
+				lineOutput[t].dataPack3 = clumpGuide.skinningWeight;
+			}
+			if (segID == 1)
+			{
+				lineOutput[t].dataPack.xyz = spawnNormal.xyz;
+				lineOutput[t].dataPack2 = growGuide.skinningBoneID;
+				lineOutput[t].dataPack3 = clumpGuide.skinningBoneID;
+
+			}
+			if (segID == 2)
+			{
+				lineOutput[t].dataPack.xyz = furPos[1].xyz;
+				lineOutput[t].dataPack2.xyz = furClumpedPos[1];
+				lineOutput[t].dataPack3.xyz = twistPos1;
+
+			}
+
+			lineOutput[t].dataPack.w = segID;
+			lineOutput[t].pos0.w = furPoints[0].growGuide.mask;
+
+lineOutput[t].pos0.w = 1;
+			// lineOutput[t].clumpBindMatCompressed.xy = transInvClumpPosMat[0].xy;
+			// lineOutput[t].clumpBindMatCompressed.zw = transInvClumpPosMat[1].xy;
+
+*/
+}
